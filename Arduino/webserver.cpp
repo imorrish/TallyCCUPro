@@ -2,7 +2,7 @@
  * webserver.cpp
  * Web server for control and configuration
  * 
- * TallyCCU Pro V3.7
+ * TallyCCU Pro V3.7.1
  */
 
 #include "WebServer.h"
@@ -107,6 +107,18 @@ void WebServer::urlDecodeInPlace(char* str) {
     writePos++;
   }
   str[writePos] = '\0';
+}
+
+// Print a string to any Print target (client, Serial) with JSON escaping
+void WebServer::printJsonSafe(Print &out, const char* str) {
+  if (!str) return;
+  for (int i = 0; str[i] != '\0'; i++) {
+    char c = str[i];
+    if (c == '"' || c == '\\') {
+      out.print('\\');
+    }
+    out.print(c);
+  }
 }
 
 // ============================================================
@@ -591,15 +603,39 @@ void WebServer::processGETRequest(const char* reqLine, EthernetClient &client) {
     client.println(F("Connection: close"));
     client.println();
     client.println(F("Rebooting..."));
+    client.flush();
+    client.stop();
     delay(100);
-    void(*resetFunc)(void) = 0;
-    resetFunc();
+    wdt_enable(WDTO_15MS);
+    while(1);
     return;
   }
 
   // getOverrides
   if (strncmp(reqLine, "GET /?getOverrides", 18) == 0) {
     handleGetOverrides(client);
+    return;
+  }
+  
+  // getTallyMap - Return current tally input->camera mappings
+  if (strncmp(reqLine, "GET /?getTallyMap", 17) == 0) {
+    client.println(F("HTTP/1.1 200 OK"));
+    client.println(F("Content-Type: application/json"));
+    client.println(F("Access-Control-Allow-Origin: *"));
+    client.println(F("Connection: close"));
+    client.println();
+    client.print(F("{\"mappings\":["));
+    byte inp, cam;
+    for (byte i = 0; i < MAXTALLIES; i++) {
+      TallyManager::getMapping(i, inp, cam);
+      if (i > 0) client.print(',');
+      client.print(F("{\"input\":"));
+      client.print(inp);
+      client.print(F(",\"camId\":"));
+      client.print(cam);
+      client.print('}');
+    }
+    client.println(F("]}"));
     return;
   }
   
@@ -907,7 +943,7 @@ void WebServer::sendJSONPresetValues(EthernetClient &client, int cameraId, int p
         client.print(_valueBuffer);
       } else {
         client.print(F("\""));
-        client.print(_valueBuffer);
+        printJsonSafe(client, _valueBuffer);
         client.print(F("\""));
       }
     }
@@ -1011,7 +1047,7 @@ void WebServer::handleParam(const char* key, const char* value, EthernetClient &
   strncpy(_valueBuffer, value, WEB_VALUE_BUFFER_SIZE - 1);
   _valueBuffer[WEB_VALUE_BUFFER_SIZE - 1] = '\0';
   urlDecodeInPlace(_valueBuffer);
-  CCUControl::applyParameterByKey(key, String(_valueBuffer));
+  CCUControl::applyParameterByKey(key, _valueBuffer);
 }
 
 // ============================================================
@@ -1083,7 +1119,7 @@ void WebServer::handleListFiles(EthernetClient &client) {
         first = false;
         
         client.print(F("{\"name\":\""));
-        client.print(fileName);
+        printJsonSafe(client, fileName);
         client.print(F("\",\"size\":"));
         client.print((unsigned long)entry.size());
         client.print(F("}"));
@@ -1224,13 +1260,8 @@ void WebServer::handleUploadFile(EthernetClient &client) {
   strcat(endPattern, boundary);
   int patternLen = strlen(endPattern);
   
-  // Buffer for pattern detection
-  char* delayBuf = (char*)malloc(patternLen + 1);
-  if (!delayBuf) {
-    while (client.available()) client.read();
-    sendJSONResponse(client, false, "Memory error");
-    return;
-  }
+  // Static buffer for pattern detection (max boundary=48 + "\r\n--"=4 + null=1 = 53)
+  char delayBuf[56];
   int delayBufLen = 0;
   
   char filename[32] = "";
@@ -1278,7 +1309,6 @@ void WebServer::handleUploadFile(EthernetClient &client) {
         }
         uploadFile = SD.open(filename, FILE_WRITE);
         if (!uploadFile) {
-          free(delayBuf);
           while (bytesRead < contentLength && client.available()) {
             client.read(); bytesRead++;
           }
@@ -1318,8 +1348,6 @@ void WebServer::handleUploadFile(EthernetClient &client) {
     
     wdt_reset();
   }
-  
-  free(delayBuf);
   
   if (uploadFile) {
     uploadFile.flush();
@@ -1457,7 +1485,7 @@ void WebServer::sendSSEEvent(int cameraId, const char* paramKey, const char* val
   _sseClient.print(F(",\"key\":\""));
   _sseClient.print(paramKey);
   _sseClient.print(F("\",\"val\":\""));
-  _sseClient.print(value);
+  printJsonSafe(_sseClient, value);
   _sseClient.println(F("\"}"));
   _sseClient.println();  // Empty line marks end of event
   
@@ -1473,7 +1501,7 @@ void WebServer::sendSSEPresetLoaded(int cameraId, int presetId, const char* pres
   _sseClient.print(F(",\"preset\":"));
   _sseClient.print(presetId);
   _sseClient.print(F(",\"name\":\""));
-  _sseClient.print(presetName ? presetName : "");
+  printJsonSafe(_sseClient, presetName ? presetName : "");
   _sseClient.println(F("\"}"));
   _sseClient.println();
   
@@ -1489,7 +1517,7 @@ void WebServer::sendSSEPresetSaved(int cameraId, int presetId, const char* prese
   _sseClient.print(F(",\"preset\":"));
   _sseClient.print(presetId);
   _sseClient.print(F(",\"name\":\""));
-  _sseClient.print(presetName ? presetName : "");
+  printJsonSafe(_sseClient, presetName ? presetName : "");
   _sseClient.println(F("\"}"));
   _sseClient.println();
   

@@ -1,7 +1,7 @@
 /*
  * TallyManager.cpp
  * Tally management implementation
- * Version 3.7
+ * Version 3.7.1
  * 
  * O(n) mapping with n=10 is fast enough and saves 256 bytes of RAM
  * Safe Mode support: SDI Shield not initialized when in safe mode
@@ -69,6 +69,16 @@ void TallyManager::setMapping(byte inputIndex, byte inputNumber, byte cameraId) 
     if (inputNumber > 0) _inputs[inputIndex] = inputNumber;
     if (cameraId > 0) _cams[inputIndex] = cameraId;
     saveMap();
+  }
+}
+
+void TallyManager::getMapping(byte index, byte &inputNumber, byte &cameraId) {
+  if (index < MAXTALLIES) {
+    inputNumber = _inputs[index];
+    cameraId = _cams[index];
+  } else {
+    inputNumber = 0;
+    cameraId = 0;
   }
 }
 

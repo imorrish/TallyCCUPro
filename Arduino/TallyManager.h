@@ -1,7 +1,7 @@
 /*
  * TallyManager.h
  * Tally map and camera control management
- * Version 3.6
+ * Version 3.7.1
  */
 
 #ifndef TALLY_MANAGER_H
@@ -23,6 +23,9 @@ class TallyManager {
     
     // Set mapping between vMix input and camera
     static void setMapping(byte inputIndex, byte inputNumber, byte cameraId);
+    
+    // Get mapping at index
+    static void getMapping(byte index, byte &inputNumber, byte &cameraId);
     
     // Override management
     static void setOverride(bool enabled);

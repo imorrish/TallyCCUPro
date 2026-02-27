@@ -1,7 +1,7 @@
 /*
  * Configuration.h
  * Central configuration file for TallyCCU Pro
- * Version 3.6
+ * Version 3.7.1
  */
 
 #ifndef CONFIGURATION_H
@@ -18,7 +18,7 @@
 // ============================================================
 // FIRMWARE VERSION
 // ============================================================
-#define FIRMWARE_VERSION "3.6"
+#define FIRMWARE_VERSION "3.7.1"
 
 // ============================================================
 // NETWORK CONFIGURATION
@@ -45,6 +45,12 @@
 #define EEPROM_TALLY_OVERRIDE_ADDR  300 // Tally override (1 byte)
 #define EEPROM_CCU_OVERRIDE_ADDR    301 // CCU override (1 byte)
 #define EEPROM_VMIX_CONNECT_ADDR    302 // vMix connection state (1 byte)
+
+// vMix IP EEPROM addresses (2 bytes each via writeInt)
+#define EEPROM_VMIX_IP0  20
+#define EEPROM_VMIX_IP1  22
+#define EEPROM_VMIX_IP2  24
+#define EEPROM_VMIX_IP3  26
 
 // ============================================================
 // SD CARD CONFIGURATION

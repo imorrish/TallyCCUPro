@@ -1,7 +1,7 @@
 /*
  * Storage.cpp
  * EEPROM storage implementation
- * Version 3.6
+ * Version 3.7.1
  * 
  * Features EEPROM wear leveling (only writes if value changed)
  */
@@ -41,6 +41,15 @@ void StorageManager::loadNetworkConfig(IPAddress &localIP, IPAddress &gateway, I
     localIP[i] = EEPROM.read(EEPROM_IP_START + i);
     gateway[i] = EEPROM.read(EEPROM_GATEWAY_START + i);
     subnet[i]  = EEPROM.read(EEPROM_SUBNET_START + i);
+  }
+  
+  // Protect against uninitialized EEPROM (all 0xFF or all 0x00)
+  if (localIP[0] == 0 || localIP[0] == 255) {
+    localIP = IPAddress(192, 168, 0, 100);
+    gateway = IPAddress(192, 168, 0, 1);
+    subnet  = IPAddress(255, 255, 255, 0);
+    saveNetworkConfig(localIP, gateway, subnet);
+    Serial.println(F("Network config initialized to defaults"));
   }
 }
 
@@ -110,8 +119,8 @@ void StorageManager::generateMacAddress(byte mac[6]) {
   if (byte5 == 0xFF && byte6 == 0xFF) {
     randomSeed(analogRead(0));
     
-    byte5 = random(0x00, 0xFF);
-    byte6 = random(0x00, 0xFF);
+    byte5 = random(0x00, 0x100);
+    byte6 = random(0x00, 0x100);
 
     EEPROM.write(MAC_BYTE_5_ADDRESS, byte5);
     EEPROM.write(MAC_BYTE_6_ADDRESS, byte6);

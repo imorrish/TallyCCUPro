@@ -570,9 +570,27 @@ input[type='text']:focus, input[type='number']:focus {
 
     window.onload = function() {
       initCams();
+      loadSavedMappings();
       checkVmixStatus();
       setInterval(checkVmixStatus, 5000);
     };
+
+    async function loadSavedMappings() {
+      try {
+        const response = await fetch('/?getTallyMap=1');
+        const data = await response.json();
+        if (data && data.mappings) {
+          data.mappings.forEach((map, i) => {
+            const inputEl = document.getElementById(`tallyCam${i}Input`);
+            const camIdEl = document.getElementById(`cam${i}ID`);
+            if (inputEl && map.input > 0 && map.input <= 99) inputEl.value = map.input;
+            if (camIdEl && map.camId > 0 && map.camId <= 8) camIdEl.value = map.camId;
+          });
+        }
+      } catch (e) {
+        console.log('Could not load saved mappings, using defaults');
+      }
+    }
   </script>
 </body>
 </html>

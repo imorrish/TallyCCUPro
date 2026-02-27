@@ -2,7 +2,7 @@
  * TallyCCUPro.ino
  * Tally and CCU System for Blackmagic cameras with vMix
  * 
- * Version 3.7
+ * Version 3.7.1
  * 
  * Features:
  * - Tally via SDI from vMix
@@ -39,12 +39,6 @@
 volatile bool g_isBusyWithSD = false;
 volatile bool g_isBusyWithNetwork = false;
 
-// EEPROM addresses for vMix IP
-const int ADDRVMIX0 = 20;
-const int ADDRVMIX1 = 22;
-const int ADDRVMIX2 = 24;
-const int ADDRVMIX3 = 26;
-
 // Loop timing
 unsigned long lastWebProcess = 0;
 unsigned long lastSerialProcess = 0;
@@ -65,7 +59,7 @@ void setup() {
   
   Serial.println();
   Serial.println(F("========================================="));
-  Serial.println(F("   TallyCCU Pro V3.7"));
+  Serial.println(F("   TallyCCU Pro V3.7.1"));
   Serial.println(F("========================================="));
   
   // Initialize safe mode detection (enables watchdog internally)
@@ -326,7 +320,7 @@ void executeSerialCommand(const char* command) {
   
   if (strncmp(command, "ip ", 3) == 0) {
     const char* ip = command + 3;
-    if (NetworkManager::setLocalIP(String(ip))) {
+    if (NetworkManager::setLocalIP(ip)) {
       Serial.println(F("IP changed successfully"));
     } else {
       Serial.println(F("Error: Invalid IP"));
@@ -336,7 +330,7 @@ void executeSerialCommand(const char* command) {
   
   if (strncmp(command, "gateway ", 8) == 0) {
     const char* ip = command + 8;
-    if (NetworkManager::setGateway(String(ip))) {
+    if (NetworkManager::setGateway(ip)) {
       Serial.println(F("Gateway changed successfully"));
     } else {
       Serial.println(F("Error: Invalid gateway"));
@@ -346,7 +340,7 @@ void executeSerialCommand(const char* command) {
   
   if (strncmp(command, "subnet ", 7) == 0) {
     const char* ip = command + 7;
-    if (NetworkManager::setSubnet(String(ip))) {
+    if (NetworkManager::setSubnet(ip)) {
       Serial.println(F("Subnet changed successfully"));
     } else {
       Serial.println(F("Error: Invalid subnet"));
@@ -472,10 +466,10 @@ void printStatus() {
 }
 
 void loadVMixIPFromEEPROM(byte vmixip[4]) {
-  vmixip[0] = StorageManager::readInt(ADDRVMIX0);
-  vmixip[1] = StorageManager::readInt(ADDRVMIX1);
-  vmixip[2] = StorageManager::readInt(ADDRVMIX2);
-  vmixip[3] = StorageManager::readInt(ADDRVMIX3);
+  vmixip[0] = StorageManager::readInt(EEPROM_VMIX_IP0);
+  vmixip[1] = StorageManager::readInt(EEPROM_VMIX_IP1);
+  vmixip[2] = StorageManager::readInt(EEPROM_VMIX_IP2);
+  vmixip[3] = StorageManager::readInt(EEPROM_VMIX_IP3);
   
   // Use defaults if not initialized
   if (vmixip[0] == 0 || vmixip[0] == 255) {
@@ -484,10 +478,10 @@ void loadVMixIPFromEEPROM(byte vmixip[4]) {
     vmixip[2] = 10;
     vmixip[3] = 140;
     
-    StorageManager::writeInt(ADDRVMIX0, vmixip[0]);
-    StorageManager::writeInt(ADDRVMIX1, vmixip[1]);
-    StorageManager::writeInt(ADDRVMIX2, vmixip[2]);
-    StorageManager::writeInt(ADDRVMIX3, vmixip[3]);
+    StorageManager::writeInt(EEPROM_VMIX_IP0, vmixip[0]);
+    StorageManager::writeInt(EEPROM_VMIX_IP1, vmixip[1]);
+    StorageManager::writeInt(EEPROM_VMIX_IP2, vmixip[2]);
+    StorageManager::writeInt(EEPROM_VMIX_IP3, vmixip[3]);
     
     Serial.println(F("vMix IP initialized to defaults"));
   }
@@ -531,10 +525,10 @@ void changeVMixIP(const char* ip) {
     }
   }
   
-  StorageManager::writeInt(ADDRVMIX0, parts[0]);
-  StorageManager::writeInt(ADDRVMIX1, parts[1]);
-  StorageManager::writeInt(ADDRVMIX2, parts[2]);
-  StorageManager::writeInt(ADDRVMIX3, parts[3]);
+  StorageManager::writeInt(EEPROM_VMIX_IP0, parts[0]);
+  StorageManager::writeInt(EEPROM_VMIX_IP1, parts[1]);
+  StorageManager::writeInt(EEPROM_VMIX_IP2, parts[2]);
+  StorageManager::writeInt(EEPROM_VMIX_IP3, parts[3]);
   
   byte vmixip[4] = {
     (byte)parts[0], 

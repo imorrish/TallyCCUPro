@@ -3338,6 +3338,13 @@ let currentCamera = 1;
 const MAX_CAMERAS = 8;
 const MAX_PRESETS = 5;
 
+// Silence unhandled fetch rejections (Arduino may be rebooting/unreachable)
+window.addEventListener('unhandledrejection', (e) => {
+    if (e.reason instanceof TypeError && e.reason.message.includes('fetch')) {
+        e.preventDefault(); // Suppress console error
+    }
+});
+
 const cameraValues = {};
 for (let i = 1; i <= MAX_CAMERAS; i++) cameraValues[i] = {};
 
@@ -3430,7 +3437,7 @@ function setCameraId(num) {
     saveCurrentStateToCache();
     currentCamera = num;
     highlightCameraButton(num);
-    fetch(`/?cameraId=${num}`);
+    fetch(`/?cameraId=${num}`).catch(() => {});
     restoreUIFromCache();
     updatePresetNames();
     
@@ -3454,11 +3461,11 @@ function saveCurrentStateToCache() {
 function sendParam(key, val) {
     const v = typeof val === 'number' ? parseFloat(val.toFixed(2)) : val;
     cacheValue(key, v);
-    fetch(`/?cameraId=${currentCamera}&${key}=${encodeURIComponent(v)}`);
+    fetch(`/?cameraId=${currentCamera}&${key}=${encodeURIComponent(v)}`).catch(() => {});
 }
 
 function triggerVoid(key) {
-    fetch(`/?cameraId=${currentCamera}&${key}=1`);
+    fetch(`/?cameraId=${currentCamera}&${key}=1`).catch(() => {});
 }
 
 function toggleCheckbox(key, cb) {
@@ -3520,11 +3527,11 @@ function styledSliderInput(paramKey, subIndex, slider) {
 function multiSubOnChange(key) {
     if (key === "pan_tilt_velocity") {
         multiSubValues[key] = [0, 0];
-        fetch(`/?cameraId=${currentCamera}&${key}=0,0`);
+        fetch(`/?cameraId=${currentCamera}&${key}=0,0`).catch(() => {});
     } else {
         const arr = multiSubValues[key] || [];
         const valStr = arr.map(v => typeof v === 'number' ? parseFloat(v.toFixed(2)) : v).join(",");
-        fetch(`/?cameraId=${currentCamera}&${key}=${encodeURIComponent(valStr)}`);
+        fetch(`/?cameraId=${currentCamera}&${key}=${encodeURIComponent(valStr)}`).catch(() => {});
     }
 }
 
@@ -3692,7 +3699,7 @@ function applyExposureFocusTools() {
     if (hiddenInput0) hiddenInput0.value = tools;
     if (hiddenInput1) hiddenInput1.value = displays;
     
-    fetch(`/?cameraId=${currentCamera}&${key}=${tools},${displays}`);
+    fetch(`/?cameraId=${currentCamera}&${key}=${tools},${displays}`).catch(() => {});
 }
 
 function setFocusAssist(subIndex, value, btn) {
@@ -3812,17 +3819,17 @@ function initKnob(name) {
     
     updateKnobIndicator(name, config.value);
     
-    knob.addEventListener('mousedown', (e) => {
+    function startDrag(clientY, e) {
         isDragging = true;
-        startY = e.clientY;
+        startY = clientY;
         startValue = config.value;
         document.body.style.cursor = 'ns-resize';
         e.preventDefault();
-    });
+    }
     
-    document.addEventListener('mousemove', (e) => {
+    function moveDrag(clientY) {
         if (!isDragging) return;
-        const deltaY = startY - e.clientY;
+        const deltaY = startY - clientY;
         const range = config.max - config.min;
         const sensitivity = range / 150;
         let newValue = startValue + (deltaY * sensitivity);
@@ -3831,15 +3838,32 @@ function initKnob(name) {
         config.value = newValue;
         updateKnobDisplay(name, newValue);
         updateKnobIndicator(name, newValue);
-    });
+    }
     
-    document.addEventListener('mouseup', () => {
+    function endDrag() {
         if (isDragging) {
             isDragging = false;
             document.body.style.cursor = '';
             sendKnobValue(name);
         }
-    });
+    }
+    
+    // Mouse events
+    knob.addEventListener('mousedown', (e) => startDrag(e.clientY, e));
+    document.addEventListener('mousemove', (e) => moveDrag(e.clientY));
+    document.addEventListener('mouseup', endDrag);
+    
+    // Touch events
+    knob.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) startDrag(e.touches[0].clientY, e);
+    }, { passive: false });
+    document.addEventListener('touchmove', (e) => {
+        if (isDragging && e.touches.length === 1) {
+            e.preventDefault();
+            moveDrag(e.touches[0].clientY);
+        }
+    }, { passive: false });
+    document.addEventListener('touchend', endDrag);
     
     knob.addEventListener('dblclick', () => {
         const defaults = { aperture: 0, focus: 0, zoom: 0, shutter: 50, gain: 0, nd: 0 };
@@ -3922,16 +3946,17 @@ function initColorWheels() {
         if (!wheel || !pointer) return;
         
         let isDragging = false;
+        let wheelThrottleTimer = null;
         
-        const updatePointer = (e) => {
+        const updatePointer = (clientX, clientY) => {
             const rect = wheel.getBoundingClientRect();
             const centerX = rect.width / 2;
             const centerY = rect.height / 2;
             const radius = rect.width / 2 - 8;
             
-            // Mouse position relative to center
-            let px = e.clientX - rect.left - centerX;
-            let py = e.clientY - rect.top - centerY;
+            // Position relative to center
+            let px = clientX - rect.left - centerX;
+            let py = clientY - rect.top - centerY;
             
             // Limit to wheel radius
             const dist = Math.sqrt(px * px + py * py);
@@ -3951,18 +3976,55 @@ function initColorWheels() {
             // Calculate RGB
             const rgb = calculateWheelRGB(nx, ny, wheelName);
             
-            document.getElementById(`${wheelName}-r`).value = rgb.r.toFixed(2);
-            document.getElementById(`${wheelName}-g`).value = rgb.g.toFixed(2);
-            document.getElementById(`${wheelName}-b`).value = rgb.b.toFixed(2);
+            // Throttle DOM updates to ~30fps
+            if (!wheelThrottleTimer) {
+                wheelThrottleTimer = setTimeout(() => {
+                    document.getElementById(`${wheelName}-r`).value = rgb.r.toFixed(2);
+                    document.getElementById(`${wheelName}-g`).value = rgb.g.toFixed(2);
+                    document.getElementById(`${wheelName}-b`).value = rgb.b.toFixed(2);
+                    wheelThrottleTimer = null;
+                }, 33);
+            }
             
             wheelData[wheelName].r = rgb.r;
             wheelData[wheelName].g = rgb.g;
             wheelData[wheelName].b = rgb.b;
         };
         
-        wheel.addEventListener('mousedown', (e) => { isDragging = true; updatePointer(e); });
-        document.addEventListener('mousemove', (e) => { if (isDragging) updatePointer(e); });
-        document.addEventListener('mouseup', () => { if (isDragging) { isDragging = false; sendWheelValues(wheelName); } });
+        function startDrag(clientX, clientY, e) {
+            isDragging = true;
+            updatePointer(clientX, clientY);
+            e.preventDefault();
+        }
+        
+        function endDrag() {
+            if (isDragging) {
+                isDragging = false;
+                // Final DOM update
+                const d = wheelData[wheelName];
+                document.getElementById(`${wheelName}-r`).value = d.r.toFixed(2);
+                document.getElementById(`${wheelName}-g`).value = d.g.toFixed(2);
+                document.getElementById(`${wheelName}-b`).value = d.b.toFixed(2);
+                sendWheelValues(wheelName);
+            }
+        }
+        
+        // Mouse events
+        wheel.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY, e));
+        document.addEventListener('mousemove', (e) => { if (isDragging) updatePointer(e.clientX, e.clientY); });
+        document.addEventListener('mouseup', endDrag);
+        
+        // Touch events
+        wheel.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) startDrag(e.touches[0].clientX, e.touches[0].clientY, e);
+        }, { passive: false });
+        document.addEventListener('touchmove', (e) => {
+            if (isDragging && e.touches.length === 1) {
+                e.preventDefault();
+                updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        }, { passive: false });
+        document.addEventListener('touchend', endDrag);
     });
 }
 
@@ -3987,7 +4049,7 @@ function sendWheelValues(wheelName) {
     const y = data.y.toFixed(2);
     multiSubValues[paramKey] = [parseFloat(r), parseFloat(g), parseFloat(b), parseFloat(y)];
     const valStr = `${r},${g},${b},${y}`;
-    fetch(`/?cameraId=${currentCamera}&${paramKey}=${encodeURIComponent(valStr)}`);
+    fetch(`/?cameraId=${currentCamera}&${paramKey}=${encodeURIComponent(valStr)}`).catch(() => {});
 }
 
 // Ranges per BMD protocol
@@ -4362,12 +4424,12 @@ function initJoystick() {
     
     let isDragging = false;
     
-    const updateJoystick = (e) => {
+    const updateJoystick = (clientX, clientY) => {
         const rect = joystick.getBoundingClientRect();
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
-        let x = e.clientX - rect.left - centerX;
-        let y = e.clientY - rect.top - centerY;
+        let x = clientX - rect.left - centerX;
+        let y = clientY - rect.top - centerY;
         const maxRadius = rect.width / 2 - 20;
         const distance = Math.sqrt(x * x + y * y);
         if (distance > maxRadius) {
@@ -4383,7 +4445,7 @@ function initJoystick() {
         document.getElementById('tilt-value').textContent = tilt;
         
         multiSubValues["pan_tilt_velocity"] = [parseFloat(pan), parseFloat(tilt)];
-        fetch(`/?cameraId=${currentCamera}&pan_tilt_velocity=${pan},${tilt}`);
+        fetch(`/?cameraId=${currentCamera}&pan_tilt_velocity=${pan},${tilt}`).catch(() => {});
     };
     
     const resetJoystick = () => {
@@ -4393,12 +4455,29 @@ function initJoystick() {
         document.getElementById('pan-value').textContent = '0.00';
         document.getElementById('tilt-value').textContent = '0.00';
         multiSubValues["pan_tilt_velocity"] = [0, 0];
-        fetch(`/?cameraId=${currentCamera}&pan_tilt_velocity=0,0`);
+        fetch(`/?cameraId=${currentCamera}&pan_tilt_velocity=0,0`).catch(() => {});
     };
     
-    joystick.addEventListener('mousedown', (e) => { isDragging = true; updateJoystick(e); });
-    document.addEventListener('mousemove', (e) => { if (isDragging) updateJoystick(e); });
+    // Mouse events
+    joystick.addEventListener('mousedown', (e) => { isDragging = true; updateJoystick(e.clientX, e.clientY); });
+    document.addEventListener('mousemove', (e) => { if (isDragging) updateJoystick(e.clientX, e.clientY); });
     document.addEventListener('mouseup', () => { if (isDragging) { isDragging = false; resetJoystick(); } });
+    
+    // Touch events
+    joystick.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            isDragging = true;
+            updateJoystick(e.touches[0].clientX, e.touches[0].clientY);
+            e.preventDefault();
+        }
+    }, { passive: false });
+    document.addEventListener('touchmove', (e) => {
+        if (isDragging && e.touches.length === 1) {
+            e.preventDefault();
+            updateJoystick(e.touches[0].clientX, e.touches[0].clientY);
+        }
+    }, { passive: false });
+    document.addEventListener('touchend', () => { if (isDragging) { isDragging = false; resetJoystick(); } });
 }
 
 // === SYNC via SSE (Server-Sent Events) ===

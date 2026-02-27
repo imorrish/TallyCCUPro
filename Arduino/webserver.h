@@ -1,7 +1,7 @@
 /*
  * WebServer.h
  * Web server for control and configuration
- * Version 3.7
+ * Version 3.7.1
  * 
  * RAM optimized with static buffers
  * Includes SSE (Server-Sent Events) for real-time sync
@@ -44,6 +44,9 @@ class WebServer {
     static void sendSSEPresetSaved(int cameraId, int presetId, const char* presetName);
     static void sendSSERequestSync();  // Request web to send its state
     static bool hasSSEClient();
+    
+    // JSON utility - print string with " and \ escaped
+    static void printJsonSafe(Print &out, const char* str);
 
   private:
     static EthernetServer _server;

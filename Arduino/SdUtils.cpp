@@ -1,7 +1,7 @@
 /*
  * SdUtils.cpp
  * SD card utilities and preset management implementation
- * Version 3.6
+ * Version 3.7.1
  * 
  * Features:
  * - No String usage in critical functions
@@ -164,18 +164,25 @@ bool SdUtils::savePreset(int cameraId, int presetId, const char* presetName, con
 }
 
 bool SdUtils::applyPreset(int cameraId, int presetId) {
+  if (!tryLockSD(2000)) {
+    Serial.println(F("Error: Could not access SD for preset"));
+    return false;
+  }
+  
   char filename[SD_PATH_BUFFER_SIZE];
   getPresetFilename(filename, SD_PATH_BUFFER_SIZE, cameraId, presetId, false);
   
   if (!fileExists(filename)) {
     Serial.print(F("Preset not found: "));
     Serial.println(filename);
+    unlockSD();
     return false;
   }
   
   File presetFile = _sd.open(filename);
   if (!presetFile) {
     Serial.println(F("Error opening preset"));
+    unlockSD();
     return false;
   }
   
@@ -232,6 +239,7 @@ bool SdUtils::applyPreset(int cameraId, int presetId) {
   CCUControl::setActiveCamera(originalCameraId);
   
   _applyingPreset = false;
+  unlockSD();
   
   // Notify TCP clients (Companion)
   CCUBroadcast::sendPresetLoaded(cameraId, presetId, presetName);
@@ -296,7 +304,7 @@ void SdUtils::writePresetListToClient(EthernetClient &client) {
       client.print(F(",\"presetId\":"));
       client.print(presetId);
       client.print(F(",\"name\":\""));
-      client.print(presetName);
+      WebServer::printJsonSafe(client, presetName);
       client.print(F("\"}"));
     }
     

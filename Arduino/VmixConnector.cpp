@@ -1,7 +1,7 @@
 /*
  * VmixConnector.cpp
  * vMix connection implementation - Ultra-fast without String
- * Version 3.6
+ * Version 3.7.1
  * 
  * Features tally debounce to avoid flickering
  */
@@ -181,7 +181,14 @@ void VmixConnector::processData() {
     if (currentTime - lastReconnectCheck > 500) {
       lastReconnectCheck = currentTime;
       
-      if (currentTime - lastReconnectAttempt > VMIX_RECONNECT_DELAY) {
+      // Progressive backoff: increase delay after repeated failures
+      unsigned long reconnectDelay = VMIX_RECONNECT_DELAY;
+      if (reconnectFailCount > 5) {
+        reconnectDelay += (unsigned long)(reconnectFailCount - 5) * 5000UL;
+        if (reconnectDelay > 120000UL) reconnectDelay = 120000UL; // Cap at 2 min
+      }
+      
+      if (currentTime - lastReconnectAttempt > reconnectDelay) {
         Serial.println(F("Attempting vMix reconnection..."));
         
         IPAddress vmixIPAddress(_vmixip[0], _vmixip[1], _vmixip[2], _vmixip[3]);
@@ -195,13 +202,8 @@ void VmixConnector::processData() {
         } else {
           Serial.println(F("Failed to reconnect to vMix"));
           reconnectFailCount++;
-          
-          if (reconnectFailCount > 5) {
-            lastReconnectAttempt = currentTime + (reconnectFailCount * 5000);
-          }
+          lastReconnectAttempt = currentTime;
         }
-        
-        lastReconnectAttempt = currentTime;
       }
     }
   }
@@ -210,15 +212,10 @@ void VmixConnector::processData() {
 bool VmixConnector::setVmixIP(const byte vmixip[4]) {
   memcpy(_vmixip, vmixip, 4);
   
-  const int ADDRVMIX0 = 20;
-  const int ADDRVMIX1 = 22;
-  const int ADDRVMIX2 = 24;
-  const int ADDRVMIX3 = 26;
-  
-  StorageManager::writeInt(ADDRVMIX0, vmixip[0]);
-  StorageManager::writeInt(ADDRVMIX1, vmixip[1]);
-  StorageManager::writeInt(ADDRVMIX2, vmixip[2]);
-  StorageManager::writeInt(ADDRVMIX3, vmixip[3]);
+  StorageManager::writeInt(EEPROM_VMIX_IP0, vmixip[0]);
+  StorageManager::writeInt(EEPROM_VMIX_IP1, vmixip[1]);
+  StorageManager::writeInt(EEPROM_VMIX_IP2, vmixip[2]);
+  StorageManager::writeInt(EEPROM_VMIX_IP3, vmixip[3]);
   
   Serial.println(F("vMix IP saved permanently to EEPROM"));
   Serial.print(vmixip[0]); Serial.print('.');
@@ -266,7 +263,6 @@ void VmixConnector::applyTallyDirectly(const char* tallyData) {
   #endif
   
   bool states[MAX_CAMERAS + 1][2] = {0};
-  bool stateChanged = false;
   
   int length = strlen(tallyData);
   if (length > MAXTALLIES) length = MAXTALLIES;
@@ -274,7 +270,7 @@ void VmixConnector::applyTallyDirectly(const char* tallyData) {
   for (int i = 0; i < length; i++) {
     char state = tallyData[i];
     
-    // Quick skip for '0' states
+    // Quick skip for '0' states (camera stays off in states array)
     if (state == '0') continue;
     
     byte cameraId = TallyManager::mapInputToCamera(i + 1);
@@ -282,11 +278,10 @@ void VmixConnector::applyTallyDirectly(const char* tallyData) {
     if (cameraId > 0 && cameraId <= MAX_CAMERAS) {
       states[cameraId][0] = (state == '1'); // Program
       states[cameraId][1] = (state == '2'); // Preview
-      stateChanged = true;
     }
   }
   
-  if (stateChanged) {
-    TallyManager::setTallyStates(states);
-  }
+  // Always apply - setTallyStates has its own internal cache
+  // that only sends I2C commands for cameras that actually changed
+  TallyManager::setTallyStates(states);
 }

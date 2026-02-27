@@ -1,7 +1,7 @@
 /*
  * CCUBroadcast.h
  * TCP server for CCU change broadcasting
- * Version 3.6
+ * Version 3.7.1
  * 
  * Protocol (outgoing messages):
  * - CCU <cameraId> <paramKey> <value>        - Parameter change
@@ -24,7 +24,7 @@
 #define CCU_BROADCAST_PORT 8098
 #define CCU_MAX_CLIENTS 2
 #define CCU_CLIENT_TIMEOUT 300000  // 5 minutes
-#define CCU_MSG_BUFFER_SIZE 64
+#define CCU_MSG_BUFFER_SIZE 128
 
 class CCUBroadcast {
 public:
