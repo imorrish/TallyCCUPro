@@ -228,7 +228,8 @@ The main control interface featuring:
 ### Midi support
 
 - requires chrome chrome://flags/#unsafely-treat-insecure-origin-as-secure enabled for the http://[ip] of the Arduino.
-
+- Only supports Behringer CMD DV1
+![Midi](Images/Midi%20Device%20Setup.png)
 ---
 
 ## Safe Mode
