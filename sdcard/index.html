@@ -2033,6 +2033,169 @@ body {
     height: 90px;
   }
 }
+
+/* === MIDI MODAL === */
+.midi-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.midi-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  width: 420px;
+  max-width: 95vw;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+
+.midi-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-modal-section {
+  margin-bottom: 14px;
+}
+
+.midi-modal-section label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.midi-modal-select {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.midi-modal-select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.midi-modal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.midi-modal-checkbox input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-blue);
+}
+
+.midi-learn-log {
+  width: 100%;
+  height: 90px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent-green);
+  overflow-y: auto;
+  resize: none;
+  box-sizing: border-box;
+}
+
+.midi-modal-warn {
+  font-size: 11px;
+  color: var(--accent-orange);
+  background: rgba(232,122,53,0.1);
+  border: 1px solid rgba(232,122,53,0.3);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 14px;
+}
+
+.midi-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
+.midi-modal-btn {
+  padding: 7px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.midi-modal-btn.primary {
+  background: var(--accent-blue);
+  color: white;
+}
+
+.midi-modal-btn.primary:hover {
+  background: var(--accent-blue-hover);
+}
+
+.midi-modal-btn.secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.midi-modal-btn.secondary:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.midi-modal-btn.warn {
+  background: transparent;
+  color: var(--accent-orange);
+  border: 1px solid var(--accent-orange);
+}
+
+.midi-modal-btn.warn:hover {
+  background: var(--accent-orange);
+  color: white;
+}
+
+.midi-status-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.midi-status-indicator.active {
+  background: var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green);
+}
 </style>
 </head>
 <body>
@@ -2060,6 +2223,7 @@ let multiSubValues = {};
     <button id="btnTally" class="toolbar-btn active" onclick="toggleOverrideTally()">Tally <span class="status">On</span></button>
     <button id="btnCCU" class="toolbar-btn active" onclick="toggleOverrideCCU()">CCU <span class="status">On</span></button>
     <button id="btnVmix" class="toolbar-btn active" onclick="toggleVmixConnect()">vMix <span class="status">On</span></button>
+    <button id="btnMIDI" class="toolbar-btn" onclick="toggleMIDI()">🎹 MIDI <span class="status">Off</span></button>
     <div class="toolbar-divider"></div>
     <button class="toolbar-btn danger" onclick="rebootArduino()">⟳ Reboot</button>
   </div>
@@ -5363,6 +5527,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     startSync();
+    // Auto-reconnect MIDI if it was previously enabled
+    if (localStorage.getItem('midiEnabled') === '1') {
+        initMIDI();
+    }
 });
 
 function initColorSliderEvents() {
@@ -5381,6 +5549,719 @@ function initColorSliderEvents() {
 }
 
 window.addEventListener('beforeunload', stopSync);
+
+// ============================================================
+//  WEB MIDI API — Behringer CMD DV-1 integration
+//  All MIDI logic is self-contained in this section.
+// ============================================================
+
+// --- Constants: CMD DV-1 default MIDI map (channel 0-indexed = ch 0) ---
+const MIDI_CH = 0; // MIDI channel 1 (0-indexed)
+
+const MIDI_NOTES = {
+  // Param mode row (top row buttons)
+  ISO:   0,
+  SAT:   1,
+  HUE:   2,
+  CONT:  3,
+  // Column select (top section ON/SEL + 1/2/3)
+  COL_TOP_0: 8,
+  COL_TOP_1: 9,
+  COL_TOP_2: 10,
+  COL_TOP_3: 11,
+  // Color mode buttons
+  MB:    16,
+  LIF:   17,
+  GAM:   18,
+  GAIN:  19,
+  // Column select (lower section ON/SEL + 1/2/3)
+  COL_BOT_0: 24,
+  COL_BOT_1: 25,
+  COL_BOT_2: 26,
+  COL_BOT_3: 27,
+  // A/B/C/D column select buttons
+  COL_A: 32,
+  COL_B: 33,
+  COL_C: 34,
+  COL_D: 35,
+  // Function buttons
+  FOCUS:  36,
+  MASTER: 37,
+  DOUBLE: 38,
+  // Bank toggle buttons (1/16 … PHRASE) — toggle camera bank 1-4 / 5-8
+  BANK_BTN_0: 40,
+  BANK_BTN_1: 41,
+  BANK_BTN_2: 42,
+  BANK_BTN_3: 43,
+  BANK_BTN_4: 44,
+  BANK_BTN_5: 45,
+  BANK_BTN_6: 46,
+  BANK_BTN_7: 47,
+  // Direct camera select (5-8 upper row, 1-4 lower row)
+  CAM5: 48,
+  CAM6: 49,
+  CAM7: 50,
+  CAM8: 51,
+  CAM1: 52,
+  CAM2: 53,
+  CAM3: 54,
+  CAM4: 55
+};
+
+const MIDI_CC = {
+  // Top knobs per column (paramMode control)
+  TOP_KNOB_0: 0,
+  TOP_KNOB_1: 1,
+  TOP_KNOB_2: 2,
+  TOP_KNOB_3: 3,
+  // Color section knobs
+  MB_Y_KNOB: 8,
+  RED_KNOB:   9,
+  GREEN_KNOB: 10,
+  BLUE_KNOB:  11,
+  // Iris knobs per column
+  IRIS_0: 16,
+  IRIS_1: 17,
+  IRIS_2: 18,
+  IRIS_3: 19
+};
+
+// --- MIDI state ---
+const midiState = {
+  enabled: false,
+  access: null,
+  input: null,
+  output: null,
+  paramMode: 'iso',   // 'iso' | 'sat' | 'hue' | 'cont'
+  colorMode: 'lif',   // 'mb'  | 'lif' | 'gam' | 'gain'
+  cameraBank: 0,      // 0 = cams 1-4, 1 = cams 5-8
+  activeColumn: 0,    // 0-3
+  learnActive: false,
+  learnHandler: null
+};
+
+// --- paramMode → { key, min, max, subIndex (optional) } ---
+const PARAM_MODE_MAP = {
+  iso:  { key: 'gain_db',        min: -12, max: 32  },
+  sat:  { key: 'color_adjust',   min: 0,   max: 2,   subIndex: 1 },
+  hue:  { key: 'color_adjust',   min: -1,  max: 1,   subIndex: 0 },
+  cont: { key: 'contrast_adjust',min: 0,   max: 2,   subIndex: 1 }
+};
+
+// --- colorMode → param key ---
+const COLOR_MODE_PARAM = {
+  mb:   'lift_adjust',
+  lif:  'lift_adjust',
+  gam:  'gamma_adjust',
+  gain: 'gain_adjust'
+};
+
+// --- Throttle map: paramKey → last send timestamp ---
+const midiThrottle = {};
+const MIDI_THROTTLE_MS = 30;
+
+// ---- Helper: scale MIDI 0-127 to param range ----
+function midiToParam(v, min, max) {
+  return parseFloat((min + (v / 127) * (max - min)).toFixed(2));
+}
+
+// ---- Helper: active camera for a column index ----
+function midiColumnCamera(col) {
+  return midiState.cameraBank * 4 + col + 1;
+}
+
+// ---- Helper: throttled fetch for a param key ----
+function midiSendThrottled(key, fetchFn) {
+  const now = Date.now();
+  if (now - (midiThrottle[key] || 0) < MIDI_THROTTLE_MS) return;
+  midiThrottle[key] = now;
+  fetchFn();
+}
+
+// ---- MIDI LED feedback ----
+function sendMidiLed(note, on) {
+  if (!midiState.output) return;
+  // Note On ch0: vel 127 = lit, vel 0 = off
+  midiState.output.send([0x90 | MIDI_CH, note, on ? 127 : 0]);
+}
+
+function syncMidiLeds() {
+  if (!midiState.output) return;
+  // Param mode LEDs
+  ['ISO','SAT','HUE','CONT'].forEach(m => {
+    sendMidiLed(MIDI_NOTES[m], midiState.paramMode === m.toLowerCase());
+  });
+  // Color mode LEDs
+  ['MB','LIF','GAM','GAIN'].forEach(m => {
+    sendMidiLed(MIDI_NOTES[m], midiState.colorMode === m.toLowerCase());
+  });
+  // Active column LEDs (A-D)
+  ['COL_A','COL_B','COL_C','COL_D'].forEach((k, i) => {
+    sendMidiLed(MIDI_NOTES[k], midiState.activeColumn === i);
+  });
+  // Camera row LEDs
+  const activeCam = midiColumnCamera(midiState.activeColumn);
+  [1,2,3,4,5,6,7,8].forEach(cam => {
+    const noteKey = 'CAM' + cam;
+    if (MIDI_NOTES[noteKey] !== undefined) sendMidiLed(MIDI_NOTES[noteKey], activeCam === cam);
+  });
+}
+
+// ---- Set paramMode ----
+function midiSetParamMode(mode) {
+  midiState.paramMode = mode;
+  ['ISO','SAT','HUE','CONT'].forEach(m => {
+    sendMidiLed(MIDI_NOTES[m], m.toLowerCase() === mode);
+  });
+}
+
+// ---- Set colorMode ----
+function midiSetColorMode(mode) {
+  midiState.colorMode = mode;
+  ['MB','LIF','GAM','GAIN'].forEach(m => {
+    sendMidiLed(MIDI_NOTES[m], m.toLowerCase() === mode);
+  });
+}
+
+// ---- Set active column (and switch UI camera) ----
+function midiSetColumn(col) {
+  midiState.activeColumn = col;
+  const camId = midiColumnCamera(col);
+  setCameraId(camId);
+  // A-D LEDs
+  ['COL_A','COL_B','COL_C','COL_D'].forEach((k, i) => {
+    sendMidiLed(MIDI_NOTES[k], i === col);
+  });
+  // Camera LEDs
+  [1,2,3,4,5,6,7,8].forEach(cam => {
+    const noteKey = 'CAM' + cam;
+    if (MIDI_NOTES[noteKey] !== undefined) sendMidiLed(MIDI_NOTES[noteKey], cam === camId);
+  });
+}
+
+// ---- Send a color wheel param for one camera ----
+function midiSendWheelChannel(camId, wheelParamKey, channelIdx, value) {
+  // wheelParamKey e.g. 'lift_adjust', channelIdx 0=R,1=G,2=B,3=Y
+  if (!multiSubValues[wheelParamKey]) {
+    const range = wheelRanges[wheelParamKey.replace('_adjust', '')];
+    const def = range ? range.default : 0;
+    multiSubValues[wheelParamKey] = [def, def, def, def];
+  }
+  const arr = [...multiSubValues[wheelParamKey]];
+  arr[channelIdx] = value;
+  const valStr = arr.map(v => parseFloat(v.toFixed(2))).join(',');
+  const key = `${wheelParamKey}_${channelIdx}_cam${camId}`;
+  midiSendThrottled(key, () => {
+    fetch(`/?cameraId=${camId}&${wheelParamKey}=${encodeURIComponent(valStr)}`).catch(() => {});
+    // Update UI only for the currently active camera
+    if (camId === currentCamera) {
+      multiSubValues[wheelParamKey] = arr;
+      const wheelName = wheelParamKey.replace('_adjust', '');
+      wheelData[wheelName][['r','g','b','y'][channelIdx]] = value;
+      const elId = `${wheelName}-${'rgby'[channelIdx]}`;
+      const el = document.getElementById(elId);
+      if (el) el.value = value.toFixed(2);
+      if (channelIdx === 3) {
+        const master = document.getElementById(`${wheelName}-master`);
+        if (master) master.value = value;
+      } else {
+        updateWheelDotFromRGB(wheelName,
+          wheelData[wheelName].r,
+          wheelData[wheelName].g,
+          wheelData[wheelName].b);
+      }
+    }
+  });
+}
+
+// ---- CC handler ----
+function handleMidiCC(ch, cc, v) {
+  // Top knobs — paramMode per column
+  if (cc >= MIDI_CC.TOP_KNOB_0 && cc <= MIDI_CC.TOP_KNOB_3) {
+    const col = cc - MIDI_CC.TOP_KNOB_0;
+    const camId = midiColumnCamera(col);
+    const pm = PARAM_MODE_MAP[midiState.paramMode];
+    if (!pm) return;
+
+    if (pm.subIndex !== undefined) {
+      // multi-sub param (sat/hue/cont)
+      if (!multiSubValues[pm.key]) multiSubValues[pm.key] = [0, 1];
+      const arr = [...multiSubValues[pm.key]];
+      arr[pm.subIndex] = midiToParam(v, pm.min, pm.max);
+      const valStr = arr.map(x => parseFloat(x.toFixed(2))).join(',');
+      midiSendThrottled(`${pm.key}_col${col}`, () => {
+        fetch(`/?cameraId=${camId}&${pm.key}=${encodeURIComponent(valStr)}`).catch(() => {});
+        if (camId === currentCamera) {
+          multiSubValues[pm.key] = arr;
+          // Update UI elements
+          if (pm.key === 'color_adjust') {
+            const hueEl = document.getElementById('cc-hue');
+            const satEl = document.getElementById('cc-saturation');
+            const hueValEl = document.getElementById('cc-hue-val');
+            const satValEl = document.getElementById('cc-saturation-val');
+            if (hueEl) hueEl.value = arr[0];
+            if (satEl) satEl.value = arr[1];
+            if (hueValEl) hueValEl.textContent = arr[0].toFixed(2);
+            if (satValEl) satValEl.textContent = arr[1].toFixed(2);
+          } else if (pm.key === 'contrast_adjust') {
+            const pivotEl = document.getElementById('cc-pivot');
+            const contrastEl = document.getElementById('cc-contrast');
+            if (pivotEl) pivotEl.value = arr[0];
+            if (contrastEl) contrastEl.value = arr[1];
+            updateContrastPivot();
+          }
+        }
+      });
+    } else {
+      // simple param (iso/gain_db)
+      const scaled = midiToParam(v, pm.min, pm.max);
+      midiSendThrottled(`${pm.key}_col${col}`, () => {
+        fetch(`/?cameraId=${camId}&${pm.key}=${encodeURIComponent(scaled)}`).catch(() => {});
+        if (camId === currentCamera) {
+          const knobName = Object.keys(knobConfig).find(k => knobConfig[k].param === pm.key);
+          if (knobName) {
+            knobConfig[knobName].value = scaled;
+            updateKnobDisplay(knobName, scaled);
+            updateKnobIndicator(knobName, scaled);
+          }
+        }
+      });
+    }
+    return;
+  }
+
+  // Iris knobs — aperture_normalised per column
+  if (cc >= MIDI_CC.IRIS_0 && cc <= MIDI_CC.IRIS_3) {
+    const col = cc - MIDI_CC.IRIS_0;
+    const camId = midiColumnCamera(col);
+    const scaled = midiToParam(v, 0, 1);
+    midiSendThrottled(`aperture_col${col}`, () => {
+      fetch(`/?cameraId=${camId}&aperture_normalised=${scaled}`).catch(() => {});
+      if (camId === currentCamera) {
+        knobConfig.aperture.value = scaled;
+        updateKnobDisplay('aperture', scaled);
+        updateKnobIndicator('aperture', scaled);
+      }
+    });
+    return;
+  }
+
+  // MB/Y knob — master (Y) channel of active colorMode, active column camera
+  if (cc === MIDI_CC.MB_Y_KNOB) {
+    const wheelKey = COLOR_MODE_PARAM[midiState.colorMode];
+    if (!wheelKey) return;
+    const wheelName = wheelKey.replace('_adjust', '');
+    const range = wheelRanges[wheelName] || { min: 0, max: 1, default: 0 };
+    const scaled = midiToParam(v, range.min, range.max);
+    const camId = midiColumnCamera(midiState.activeColumn);
+    midiSendWheelChannel(camId, wheelKey, 3, scaled);
+    return;
+  }
+
+  // Red/Green/Blue knobs — gang all cameras
+  if (cc >= MIDI_CC.RED_KNOB && cc <= MIDI_CC.BLUE_KNOB) {
+    const channelIdx = cc - MIDI_CC.RED_KNOB; // 0=R, 1=G, 2=B
+    // mb mode only has Y channel, skip R/G/B
+    if (midiState.colorMode === 'mb') return;
+    const wheelKey = COLOR_MODE_PARAM[midiState.colorMode];
+    if (!wheelKey) return;
+    const wheelName = wheelKey.replace('_adjust', '');
+    const range = wheelRanges[wheelName] || { min: 0, max: 1, default: 0 };
+    const scaled = midiToParam(v, range.min, range.max);
+    for (let cam = 1; cam <= 8; cam++) {
+      midiSendWheelChannel(cam, wheelKey, channelIdx, scaled);
+    }
+    return;
+  }
+}
+
+// ---- Note handler ----
+function handleMidiNote(ch, note, vel) {
+  if (vel === 0) return; // ignore Note Off
+
+  // Param mode buttons
+  if (note === MIDI_NOTES.ISO)  { midiSetParamMode('iso');  return; }
+  if (note === MIDI_NOTES.SAT)  { midiSetParamMode('sat');  return; }
+  if (note === MIDI_NOTES.HUE)  { midiSetParamMode('hue');  return; }
+  if (note === MIDI_NOTES.CONT) { midiSetParamMode('cont'); return; }
+
+  // Color mode buttons
+  if (note === MIDI_NOTES.MB)   { midiSetColorMode('mb');   return; }
+  if (note === MIDI_NOTES.LIF)  { midiSetColorMode('lif');  return; }
+  if (note === MIDI_NOTES.GAM)  { midiSetColorMode('gam');  return; }
+  if (note === MIDI_NOTES.GAIN) { midiSetColorMode('gain'); return; }
+
+  // Top column select
+  if (note >= MIDI_NOTES.COL_TOP_0 && note <= MIDI_NOTES.COL_TOP_3) {
+    midiSetColumn(note - MIDI_NOTES.COL_TOP_0); return;
+  }
+  // Lower column select (mirror)
+  if (note >= MIDI_NOTES.COL_BOT_0 && note <= MIDI_NOTES.COL_BOT_3) {
+    midiSetColumn(note - MIDI_NOTES.COL_BOT_0); return;
+  }
+  // A-D column select
+  if (note >= MIDI_NOTES.COL_A && note <= MIDI_NOTES.COL_D) {
+    midiSetColumn(note - MIDI_NOTES.COL_A); return;
+  }
+
+  // Direct camera select buttons (bottom rows)
+  const camNoteMap = {
+    [MIDI_NOTES.CAM1]: 1, [MIDI_NOTES.CAM2]: 2,
+    [MIDI_NOTES.CAM3]: 3, [MIDI_NOTES.CAM4]: 4,
+    [MIDI_NOTES.CAM5]: 5, [MIDI_NOTES.CAM6]: 6,
+    [MIDI_NOTES.CAM7]: 7, [MIDI_NOTES.CAM8]: 8
+  };
+  if (camNoteMap[note] !== undefined) {
+    const camId = camNoteMap[note];
+    midiState.cameraBank = camId > 4 ? 1 : 0;
+    midiState.activeColumn = (camId - 1) % 4;
+    setCameraId(camId);
+    syncMidiLeds();
+    return;
+  }
+
+  // Bank toggle buttons (BANK_BTN_0..7, notes 40-47): toggle camera bank 0↔1 (cams 1-4 vs 5-8)
+  if (note >= MIDI_NOTES.BANK_BTN_0 && note <= MIDI_NOTES.BANK_BTN_7) {
+    midiState.cameraBank = midiState.cameraBank === 0 ? 1 : 0;
+    // After bank toggle, update active camera to same column in new bank
+    const camId = midiColumnCamera(midiState.activeColumn);
+    setCameraId(camId);
+    syncMidiLeds();
+    return;
+  }
+
+  // FOCUS — autofocus on active column camera
+  if (note === MIDI_NOTES.FOCUS) {
+    const targetCam = midiColumnCamera(midiState.activeColumn);
+    fetch(`/?cameraId=${targetCam}&instantaneous_autofocus=1`).catch(() => {});
+    return;
+  }
+
+  // MASTER — copy color correction from camera 1 to active column camera
+  if (note === MIDI_NOTES.MASTER) {
+    const targetCam = midiColumnCamera(midiState.activeColumn);
+    if (targetCam === 1) return; // nothing to copy
+    const srcState = cameraStates[1] || {};
+    const colorKeys = ['lift_adjust','gamma_adjust','gain_adjust','offset_adjust',
+                       'contrast_adjust','color_adjust','luma_mix'];
+    colorKeys.forEach(key => {
+      if (srcState[key] !== undefined) {
+        const val = srcState[key];
+        const valStr = Array.isArray(val) ? val.join(',') : String(val);
+        fetch(`/?cameraId=${targetCam}&${key}=${encodeURIComponent(valStr)}`).catch(() => {});
+      }
+    });
+    return;
+  }
+
+  // DOUBLE — reset color correction to defaults on active column camera
+  if (note === MIDI_NOTES.DOUBLE) {
+    const targetCam = midiColumnCamera(midiState.activeColumn);
+    const defaults = [
+      ['lift_adjust',  '0,0,0,0'],
+      ['gamma_adjust', '0,0,0,0'],
+      ['gain_adjust',  '1,1,1,1'],
+      ['offset_adjust','0,0,0,0'],
+      ['contrast_adjust','0.5,1'],
+      ['color_adjust', '0,1'],
+      ['luma_mix',     '1']
+    ];
+    defaults.forEach(([key, val]) => {
+      fetch(`/?cameraId=${targetCam}&${key}=${encodeURIComponent(val)}`).catch(() => {});
+    });
+    // Also update UI if this is the current camera
+    if (targetCam === currentCamera) {
+      resetAllColorWheels();
+      resetContrastPivot();
+      resetHueSat();
+      resetLumMix();
+    }
+    return;
+  }
+}
+
+// ---- Main MIDI message router ----
+function onMidiMessage(event) {
+  const [status, data1, data2] = event.data;
+  const msgType = status & 0xF0;
+  const ch = status & 0x0F;
+
+  if (msgType === 0xB0) {
+    // Control Change
+    handleMidiCC(ch, data1, data2);
+  } else if (msgType === 0x90) {
+    // Note On (vel=0 treated as Note Off inside handleMidiNote)
+    handleMidiNote(ch, data1, data2);
+  }
+}
+
+// ---- MIDI learn mode ----
+function startMidiLearnMode() {
+  const logEl = document.getElementById('midiLearnLog');
+  if (!logEl) return;
+
+  midiState.learnActive = true;
+  const select = document.getElementById('midiDeviceSelect');
+  const portName = select ? select.value : null;
+
+  let testInput = null;
+  if (portName && midiState.access) {
+    for (const [, port] of midiState.access.inputs) {
+      if (port.name === portName) { testInput = port; break; }
+    }
+  }
+  if (!testInput) {
+    logEl.value = 'No device selected.\n';
+    return;
+  }
+
+  logEl.value = 'Listening… move a control on the DV-1.\n';
+
+  midiState.learnHandler = (e) => {
+    const [status, d1, d2] = e.data;
+    const type = (status & 0xF0) === 0xB0 ? 'CC' : (status & 0xF0) === 0x90 ? 'Note' : `0x${((status >> 4)).toString(16).toUpperCase()}`;
+    const ch = (status & 0x0F) + 1;
+    const line = `${type}  ch${ch}  #${d1}  val:${d2}\n`;
+    logEl.value += line;
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+  testInput.addEventListener('midimessage', midiState.learnHandler);
+}
+
+function stopMidiLearnMode() {
+  midiState.learnActive = false;
+  if (midiState.learnHandler && midiState.access) {
+    const select = document.getElementById('midiDeviceSelect');
+    const portName = select ? select.value : null;
+    if (portName) {
+      for (const [, port] of midiState.access.inputs) {
+        if (port.name === portName) {
+          port.removeEventListener('midimessage', midiState.learnHandler);
+          break;
+        }
+      }
+    }
+  }
+  midiState.learnHandler = null;
+}
+
+// ---- Populate device list ----
+function populateMidiDeviceList() {
+  const select = document.getElementById('midiDeviceSelect');
+  if (!select || !midiState.access) return;
+  select.innerHTML = '';
+  if (midiState.access.inputs.size === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '— No MIDI devices found —';
+    select.appendChild(opt);
+    return;
+  }
+  for (const [, port] of midiState.access.inputs) {
+    const opt = document.createElement('option');
+    opt.value = port.name;
+    opt.textContent = port.name;
+    if (port.name === localStorage.getItem('midiPortName')) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+// ---- Connect to a named MIDI port ----
+function connectMidiPort(portName) {
+  if (!midiState.access) return false;
+
+  // Disconnect existing input
+  if (midiState.input) {
+    midiState.input.removeEventListener('midimessage', onMidiMessage);
+    midiState.input = null;
+  }
+
+  let found = false;
+  for (const [, port] of midiState.access.inputs) {
+    if (port.name === portName) {
+      midiState.input = port;
+      port.addEventListener('midimessage', onMidiMessage);
+      found = true;
+      break;
+    }
+  }
+
+  // Connect matching output (same name prefix or exact match)
+  midiState.output = null;
+  for (const [, port] of midiState.access.outputs) {
+    if (port.name === portName || port.name.includes('DV-1') || port.name === portName.replace(' MIDI 1','')) {
+      midiState.output = port;
+      break;
+    }
+  }
+
+  return found;
+}
+
+// ---- Disconnect MIDI ----
+function disconnectMidi() {
+  stopMidiLearnMode();
+  if (midiState.input) {
+    midiState.input.removeEventListener('midimessage', onMidiMessage);
+    midiState.input = null;
+  }
+  midiState.output = null;
+  midiState.enabled = false;
+}
+
+// ---- Open setup modal ----
+function openMidiSetupModal() {
+  // Remove existing modal if any
+  const existing = document.getElementById('midiModalOverlay');
+  if (existing) existing.remove();
+
+  const hasAPI = typeof navigator.requestMIDIAccess === 'function';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'midiModalOverlay';
+  overlay.className = 'midi-overlay';
+
+  overlay.innerHTML = `
+    <div class="midi-modal">
+      <div class="midi-modal-title">🎹 MIDI Device Setup — Behringer CMD DV-1</div>
+      ${!hasAPI ? `<div class="midi-modal-warn">
+        ⚠️ Web MIDI API is not available in this browser or context.<br>
+        Web MIDI requires a <strong>secure context (HTTPS)</strong> or localhost.<br>
+        Try: Chrome/Edge on localhost, or enable the flag <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> for this device's IP.
+      </div>` : ''}
+      <div class="midi-modal-section">
+        <label>MIDI Input Device</label>
+        <select class="midi-modal-select" id="midiDeviceSelect">
+          <option value="">— Loading devices… —</option>
+        </select>
+      </div>
+      <div class="midi-modal-section">
+        <label class="midi-modal-checkbox">
+          <input type="checkbox" id="midiOutputFeedback" ${localStorage.getItem('midiOutputFeedback') !== '0' ? 'checked' : ''}>
+          Enable LED output feedback (lights buttons on DV-1)
+        </label>
+      </div>
+      <div class="midi-modal-section">
+        <label>MIDI Test / Learn</label>
+        <textarea class="midi-learn-log" id="midiLearnLog" readonly placeholder="Press 'Start Test' then move controls on the DV-1…"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button class="midi-modal-btn warn" id="midiLearnStartBtn" onclick="startMidiLearnMode()">▶ Start Test</button>
+          <button class="midi-modal-btn secondary" onclick="stopMidiLearnMode();document.getElementById('midiLearnLog').value=''">■ Stop</button>
+        </div>
+      </div>
+      <div class="midi-modal-actions">
+        <button class="midi-modal-btn secondary" onclick="closeMidiSetupModal(false)">Cancel</button>
+        <button class="midi-modal-btn primary" onclick="closeMidiSetupModal(true)" ${!hasAPI ? 'disabled' : ''}>Connect</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Request MIDI access and populate device list
+  if (hasAPI) {
+    navigator.requestMIDIAccess({ sysex: false }).then(access => {
+      midiState.access = access;
+      populateMidiDeviceList();
+      // Listen for device changes
+      access.onstatechange = () => populateMidiDeviceList();
+    }).catch(err => {
+      const select = document.getElementById('midiDeviceSelect');
+      if (select) {
+        select.innerHTML = `<option value="">— Permission denied: ${err.message} —</option>`;
+      }
+    });
+  }
+}
+
+// ---- Close modal ----
+function closeMidiSetupModal(confirm) {
+  stopMidiLearnMode();
+
+  if (confirm) {
+    const select = document.getElementById('midiDeviceSelect');
+    const outputCb = document.getElementById('midiOutputFeedback');
+    const portName = select ? select.value : '';
+
+    localStorage.setItem('midiOutputFeedback', outputCb && outputCb.checked ? '1' : '0');
+
+    if (portName) {
+      localStorage.setItem('midiPortName', portName);
+      const connected = connectMidiPort(portName);
+      if (connected) {
+        midiState.enabled = true;
+        updateToggleBtn('btnMIDI', true);
+        if (outputCb && !outputCb.checked) midiState.output = null;
+        syncMidiLeds();
+        console.log('[MIDI] Connected to:', portName);
+      } else {
+        alert(`Could not connect to MIDI port: "${portName}"`);
+        updateToggleBtn('btnMIDI', false);
+        midiState.enabled = false;
+        localStorage.setItem('midiEnabled', '0');
+      }
+    } else {
+      // No device selected — disable
+      midiState.enabled = false;
+      updateToggleBtn('btnMIDI', false);
+      localStorage.setItem('midiEnabled', '0');
+    }
+  } else {
+    // Cancelled — if was not previously enabled, keep off
+    if (!midiState.enabled) {
+      updateToggleBtn('btnMIDI', false);
+      localStorage.setItem('midiEnabled', '0');
+    }
+  }
+
+  const overlay = document.getElementById('midiModalOverlay');
+  if (overlay) overlay.remove();
+}
+
+// ---- initMIDI — called on page load if midiEnabled was saved ----
+function initMIDI() {
+  if (typeof navigator.requestMIDIAccess !== 'function') return;
+  const savedPort = localStorage.getItem('midiPortName');
+  if (!savedPort) return;
+
+  navigator.requestMIDIAccess({ sysex: false }).then(access => {
+    midiState.access = access;
+    access.onstatechange = () => {
+      // Auto-reconnect if port re-appears
+      if (!midiState.enabled) return;
+      populateMidiDeviceList();
+    };
+    const connected = connectMidiPort(savedPort);
+    if (connected) {
+      midiState.enabled = true;
+      updateToggleBtn('btnMIDI', true);
+      const outputEnabled = localStorage.getItem('midiOutputFeedback') !== '0';
+      if (!outputEnabled) midiState.output = null;
+      syncMidiLeds();
+      console.log('[MIDI] Auto-connected to:', savedPort);
+    }
+  }).catch(err => {
+    console.warn('[MIDI] Auto-connect failed:', err.message);
+  });
+}
+
+// ---- toggleMIDI — called by toolbar button ----
+function toggleMIDI() {
+  const btn = document.getElementById('btnMIDI');
+  const currentlyOn = btn && btn.classList.contains('active');
+
+  if (currentlyOn) {
+    // Turn off
+    disconnectMidi();
+    updateToggleBtn('btnMIDI', false);
+    localStorage.setItem('midiEnabled', '0');
+  } else {
+    // Turn on — open setup modal
+    localStorage.setItem('midiEnabled', '1');
+    openMidiSetupModal();
+  }
+}
+
 </script>
 </body>
 </html>
