@@ -225,6 +225,10 @@ The main control interface featuring:
 - **Delete/Rename**: File management
 ![Front](Images/SDCard.png)
 
+### Midi support
+
+- requires chrome chrome://flags/#unsafely-treat-insecure-origin-as-secure enabled for the http://[ip] of the Arduino.
+
 ---
 
 ## Safe Mode
@@ -467,6 +471,8 @@ The Blackmagic SDI protocol is **write-only** - parameters can be sent to camera
 
 ## Changelog
 
+###  Ian's fork
+- **New**: Added experimentl midi support for Behringer CMD DV-1. 
 ### v3.7.1 (Latest)
 - **Fixed**: vMix reconnection loop flooding network (now uses progressive backoff)
 - **Fixed**: Tally lights stuck ON after vMix disconnect
